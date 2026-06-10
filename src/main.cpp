@@ -1,19 +1,23 @@
 /*
     Kasey the Kinderbot Cartridge Bus
 
-    Data bus:
-        D0-D7 -> pins 22-29 (PORTA)
+    This seems to be a pure data bus, rather than a data/address bus.
+    The console seems to send commands and get responses rather than
+    fetching instructions and executing them.
+
+    Data lines:
+        D0-D7 -> pins 22-29 (PORTA). Idle high.
 
     Control:
-        C0 -> pin 2 (INT4)
-        C1 -> pin 3 (INT5)
+        C0 -> pin 2 (INT4). Idle low.
+        C1 -> pin 3 (INT5). Idle low.
 
     Protocol:
         C0 rises first  => Console sending, capture byte
-        C1 rises second => ACK
+        C1 rises second => ACK from cart
 
-        C1 rises first  => Cartridge sending, capture byte
-        C0 rises second => ACK
+        C1 rises first  => Cart sending, capture byte
+        C0 rises second => ACK from console
 */
 
 #include "Arduino.h"
@@ -37,8 +41,13 @@ struct Packet {
     uint32_t timestamp_us;
 };
 
-// This is a reasonable buffer size that doesn't seem to ever drop packets
-// under normal bus conditions.
+// We store captured packets in a ring buffer because
+// even a 2 Mbaud serial connection is too slow to print
+// all packets in real time. So we store a packet when we get
+// an interrupt and print them in the main loop.
+//
+// This is a reasonable buffer size determined empirically. It
+// doesn't seem to ever drop packets under normal bus conditions.
 #define BUFFER_SIZE 1024
 volatile Packet buffer[BUFFER_SIZE];
 
@@ -52,6 +61,24 @@ volatile State state = STATE_IDLE;
 volatile uint8_t c0_state = 0;
 volatile uint8_t c1_state = 0;
 
+// Read C0 from the ATmega2560 input register directly.
+//
+// Pin 2 on the Mega maps to PE4 (Port E, bit 4).
+// PINE is the live input register for all Port E pins, and
+// _BV(PE4) creates a bit mask with only bit 4 set.
+//
+// We use this instead of digitalRead(2) because this code runs in an ISR,
+// where lower overhead gives more accurate timestamps and fewer dropped packets.
+// TODO: See if this is truly necessary.
+static inline uint8_t readControlLineC0() {
+    return (PINE & _BV(PE4)) ? 1 : 0;
+}
+
+// Read C1 from pin 3, which maps to PE5 on ATmega2560.
+static inline uint8_t readControlLineC1() {
+    return (PINE & _BV(PE5)) ? 1 : 0;
+}
+
 static inline void pushPacket(uint8_t data, uint8_t dir) {
     uint16_t next = (head + 1) & (BUFFER_SIZE - 1);
 
@@ -61,6 +88,8 @@ static inline void pushPacket(uint8_t data, uint8_t dir) {
         return;
     }
 
+    // Capture the byte and direction at interrupt time.
+    // This keeps bus sampling in the ISR and serial printing in loop().
     buffer[head].data         = data;
     buffer[head].dir          = dir;
     buffer[head].timestamp_us = micros();
@@ -74,7 +103,7 @@ static inline void checkForIdle() {
 }
 
 void handleC0Change() {
-    c0_state = (PINE & _BV(PE4)) ? 1 : 0;
+    c0_state = readControlLineC0();
 
     if (c0_state) {
         switch(state) {
@@ -101,7 +130,7 @@ void handleC0Change() {
 }
 
 void handleC1Change() {
-    c1_state = (PINE & _BV(PE5)) ? 1 : 0;
+    c1_state = readControlLineC1();
 
     if (c1_state) {
         switch(state) {
@@ -136,16 +165,23 @@ void ISR_C1() {
 }
 
 void setup() {
+    // This is the highest baud rate that the ATmega can support,
+    // so we will use it for the best throughput.
     Serial.begin(2000000);
 
-    // Data bus inputs
+    // This controls direction per Port A bit (0: input, 1: output).
+    // We are only sniffing the data bus, so we want all the data lines to be inputs.
     DDRA = 0x00;
+    // This controls output level when configured as output, or pull-up when input.
+    // We are only sniffing the data bus, so disable internal pull-ups on all data lines.
     PORTA = 0x00;
-
-    // Control lines inputs
+    // Control lines should be high-impedance inputs since we are only sniffing the bus.
     pinMode(2, INPUT);
     pinMode(3, INPUT);
 
+    // Attach external interrupts to both edges of C0 and C1, so we can detect which
+    // control line rose first (start-of-byte direction) and detect when both lines
+    // return low (back to idle state).
     attachInterrupt(
         digitalPinToInterrupt(2),
         ISR_C0,
@@ -177,6 +213,7 @@ void loop() {
         Serial.println(F("]"));
     }
 
+    // Write out all the packets in the buffer.
     while (tail != head)
     {
         Packet pkt;
