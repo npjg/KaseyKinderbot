@@ -1,8 +1,24 @@
-This repo contains knowledge I have gathered for dumping the ROMs on Kasey the
-Kinderbot cartridges.
+Kasey the Kinderbot was one of my favorite toys growing up. After reading the [recent legendary writeup about Pixter](https://dmitry.gr/?r=05.Projects&proj=37.%20Pixter), I decided it was time to learn more about hardware reverse engineering and try to document Kasey.
 
+Kasey was released in 2002 and has a 80x80 LCD (non-touch). There were at least 8 different cartridges available (https://kasey-the-kinderbot.fandom.com/wiki/Software_Cartridges).
 
-# Cart Socket PCB Layout
+# Initial Observations
+Kasey has a debug mode that can be entered by holding the red and green buttons while applying power (NOT pressing the soft power button). This lets you cycle through motors, LCD patterns, and sounds (separated into speech, SFX, and music).
+
+While the motor control stuff is interesting, my main goal was figuring out how to run code and dump ROMs. So I am not worrying about reversing the motor signals for now.
+
+I was also able to get Kasey into an apparent panic where the following was printed on screen and the system halted:
+```
+A-?-82
+X-?-01
+Y-?-AB
+```
+Hmm, those look a lot like 6502 registers... But this is still guesswork, no actual proof yet until code can be dumped. However, given how common Sunplus/Generalplus 6502 MCUs were in toys of this vintage, it wouldn't surprise me.
+
+The communication between the cart and console is NOT the Sunplus BEX bus though - it is something else. See the Arduino code for a prototype protocol sniffer.
+
+# Pinouts
+## Cart Socket PCB Layout
 The Socket PCB splits the raw cart pins into two connectors (CON1 and CON2) that go to the motherboard.
 
 ```
@@ -21,7 +37,7 @@ CON2                CON1
 REV: A            02/02/28
 ```
 
-## CON2 Pinout
+### CON2 Pinout
 ```
         SOCKET PCB
 CON2                          ->                 CON_ROM2
@@ -40,7 +56,7 @@ CON2                          ->                 CON_ROM2
                                               12 (Black) Contrast PCB
 ```
 
-## CON1 Pinout
+### CON1 Pinout
 ```
 CON1                          ->                 CON_ROM1
 0  |-| (Black)  VCC (+3.3V)
@@ -57,7 +73,7 @@ CON1                          ->                 CON_ROM1
 
 PWM audio seems to be active low, with a PWM period around 40 kHz.
 
-# Waist Pinout (CON_W)
+## Waist Pinout (CON_W)
 ```
 0  |-| (Red)    +4.5v
 1  |-| (Yellow) Clock
@@ -73,7 +89,7 @@ PWM audio seems to be active low, with a PWM period around 40 kHz.
          CON_W
 ```
 
-# Head Pinout (CON_H)
+## Head Pinout (CON_H)
 ```
 0 |-| (White) Mouth LED
 1 |-| (Orange)
@@ -85,3 +101,4 @@ PWM audio seems to be active low, with a PWM period around 40 kHz.
 7 |-| (Black)
 8 |-| (Red)
 ```
+
