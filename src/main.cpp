@@ -9,11 +9,11 @@
         C1 -> pin 3 (INT5)
 
     Protocol:
-        C0 rises first  => Console sending
-        C1 rises second => ACK, capture byte
+        C0 rises first  => Console sending, capture byte
+        C1 rises second => ACK
 
-        C1 rises first  => Cartridge sending
-        C0 rises second => ACK, capture byte
+        C1 rises first  => Cartridge sending, capture byte
+        C0 rises second => ACK
 */
 
 #include "Arduino.h"
@@ -79,15 +79,17 @@ void handleC0Change() {
     if (c0_state) {
         switch(state) {
             case STATE_IDLE:
+                // C0 rising first indicates console is attempting to send.
+                // Data should be valid once C0 rises.
+                pushPacket(
+                    PINA,
+                    DIR_CONSOLE_TO_CART
+                );
                 state = STATE_CONSOLE_SENDING;
                 break;
 
             case STATE_CART_SENDING:
-                // ACK from console
-                pushPacket(
-                    PINA,
-                    DIR_CART_TO_CONSOLE
-                );
+                // ACK from cart.
                 break;
 
             default:
@@ -104,15 +106,17 @@ void handleC1Change() {
     if (c1_state) {
         switch(state) {
             case STATE_IDLE:
+                // C1 rising first indicates cartridge is attempting to send.
+                // Data should be valid once C1 rises.
+                pushPacket(
+                    PINA,
+                    DIR_CART_TO_CONSOLE
+                );
                 state = STATE_CART_SENDING;
                 break;
 
             case STATE_CONSOLE_SENDING:
-                // ACK from cartridge
-                pushPacket(
-                    PINA,
-                    DIR_CONSOLE_TO_CART
-                );
+                // ACK from console.
                 break;
 
             default:
